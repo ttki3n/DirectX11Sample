@@ -21,7 +21,7 @@ ID3D11Texture2D*		g_d3dDepthStencilBuffer = nullptr; //a texture to associate to
 ID3D11DepthStencilState*	g_d3dDepthStencilState = nullptr;
 ID3D11RasterizerState*		g_d3dRasterizeState = nullptr;
 
-D3D11_VIEWPORT g_viewPort = { 0 };
+D3D11_VIEWPORT g_viewport = { 0 };
 
 // specific for this sample
 ID3D11InputLayout* g_d3dInputLayout = nullptr;
@@ -73,6 +73,7 @@ WORD g_indices[36] =
 };
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+DXGI_RATIONAL QueryRefreshRate(UINT screenWidth, UINT screenHeight, BOOL vsync);
 
 template<class ShaderClass>
 ShaderClass* LoadShader(const std::wstring& filename, const std::string& entrypoint, const std::string& profile);
@@ -175,6 +176,8 @@ int Run()
 	return static_cast<int>(msg.wParam);
 }
 
+
+int InitDirectX(HINSTANCE hInstance, BOOL vSync);
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine, int cmdShow)
 {
 	UNREFERENCED_PARAMETER(prevInstance);
@@ -193,6 +196,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine,
 		return -1;
 	}
 
+	if (InitDirectX(hInstance, g_enableVSync) != 0)
+	{
+		MessageBox(nullptr, TEXT("Failed to initialize DirectX!"), TEXT("Error"), MB_OK);
+		return -1;
+	}
 	int result = Run();
 	return result;
 }
@@ -273,6 +281,74 @@ int InitDirectX(HINSTANCE hInstance, BOOL vSync)
 	}
 
 	COMSafeRelease(backBuffer);
+
+	// Create the depth buffer
+	D3D11_TEXTURE2D_DESC depthStencilBufferDesc;
+	ZeroMemory(&depthStencilBufferDesc, sizeof(D3D11_TEXTURE2D_DESC));
+	depthStencilBufferDesc.ArraySize = 1;
+	depthStencilBufferDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	depthStencilBufferDesc.CPUAccessFlags = 0;
+	depthStencilBufferDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+	depthStencilBufferDesc.Width = clientWidth;
+	depthStencilBufferDesc.Height = clientHeight;
+	depthStencilBufferDesc.MipLevels = 1;
+	depthStencilBufferDesc.SampleDesc.Count = 1;
+	depthStencilBufferDesc.SampleDesc.Quality = 0;
+	depthStencilBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+	hr = g_d3dDevice->CreateTexture2D(&depthStencilBufferDesc, nullptr, &g_d3dDepthStencilBuffer);
+	if (FAILED(hr))
+	{
+		return -1;
+	}
+
+	hr = g_d3dDevice->CreateDepthStencilView(g_d3dDepthStencilBuffer, nullptr, &g_d3dDepthStencilView);
+	if (FAILED(hr))
+	{
+		return -1;
+	}
+
+	// setup depth stencil state
+	D3D11_DEPTH_STENCIL_DESC depthStencilStateDesc;
+	ZeroMemory(&depthStencilStateDesc, sizeof(D3D11_DEPTH_STENCIL_DESC));
+
+	depthStencilStateDesc.DepthEnable = TRUE;
+	depthStencilStateDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+	depthStencilStateDesc.DepthFunc = D3D11_COMPARISON_LESS;
+	depthStencilStateDesc.StencilEnable = FALSE;
+
+	hr = g_d3dDevice->CreateDepthStencilState(&depthStencilStateDesc, &g_d3dDepthStencilState);
+
+	// setup rasterizer state
+	D3D11_RASTERIZER_DESC rasterizerDesc;
+	ZeroMemory(&rasterizerDesc, sizeof(D3D11_RASTERIZER_DESC));
+
+	rasterizerDesc.AntialiasedLineEnable = FALSE;
+	rasterizerDesc.CullMode = D3D11_CULL_BACK;
+	rasterizerDesc.DepthBias = 0;
+	rasterizerDesc.DepthBiasClamp = 0.0f;
+	rasterizerDesc.DepthClipEnable = TRUE;
+	rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+	rasterizerDesc.FrontCounterClockwise = FALSE;
+	rasterizerDesc.MultisampleEnable = FALSE;
+	rasterizerDesc.ScissorEnable = FALSE;
+	rasterizerDesc.SlopeScaledDepthBias = 0.0f;
+
+	hr = g_d3dDevice->CreateRasterizerState(&rasterizerDesc, &g_d3dRasterizeState);
+	if (FAILED(hr))
+	{
+		return -1;
+	}
+
+	// Initialize the viewport
+	g_viewport.Width = static_cast<float>(clientWidth);
+	g_viewport.Height = static_cast<float>(clientHeight);
+	g_viewport.TopLeftX = 0.0f;
+	g_viewport.TopLeftY = 0.0f;
+	g_viewport.MinDepth = 0.0f;
+	g_viewport.MaxDepth = 1.0f;
+
+	return 0;
 
 }
 
