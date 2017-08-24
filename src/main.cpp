@@ -75,8 +75,14 @@ WORD g_indices[36] =
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 DXGI_RATIONAL QueryRefreshRate(UINT screenWidth, UINT screenHeight, BOOL vsync);
 
-template<class ShaderClass>
-ShaderClass* LoadShader(const std::wstring& filename, const std::string& entrypoint, const std::string& profile);
+template<class TShaderClass>
+TShaderClass* LoadShader(const std::wstring& filename, const std::string& entrypoint, const std::string& profile);
+
+template<class TShaderClass>
+std::string GetLatestProfile();
+
+template<class TShaderClass>
+TShaderClass* CreateShader(ID3DBlob* pShaderBlob, ID3D11ClassLinkage* pClassLinkage);
 
 bool LoadContent();
 void UnloadContent();
@@ -84,6 +90,8 @@ void UnloadContent();
 void Update(float deltaTime);
 void Render();
 void Cleanup();
+
+
 
 int InitApplication(HINSTANCE hInstance, int cmdShow)
 {
@@ -350,6 +358,151 @@ int InitDirectX(HINSTANCE hInstance, BOOL vSync)
 
 	return 0;
 
+}
+
+template<>
+std::string GetLatestProfile<ID3D11VertexShader>()
+{
+	assert(g_d3dDevice);
+
+	D3D_FEATURE_LEVEL featureLevel = g_d3dDevice->GetFeatureLevel();
+
+	switch (featureLevel)
+	{
+	case D3D_FEATURE_LEVEL_11_1:
+	case D3D_FEATURE_LEVEL_11_0:
+		{
+			return "vs_5_0";
+		}
+		break;
+	case D3D_FEATURE_LEVEL_10_1:
+		{
+			return "vs_4_1";
+		}
+		break;
+	case D3D_FEATURE_LEVEL_10_0:
+		{
+			return "vs_4_0";
+		}
+		break;
+	case D3D_FEATURE_LEVEL_9_3:
+		{
+			return "vs_4_0_level_9_3";
+		}
+		break;
+	case D3D_FEATURE_LEVEL_9_2:
+	case D3D_FEATURE_LEVEL_9_1:
+		{
+			return "vs_4_0_level_9_1";
+		}
+		break;
+	}
+
+	return "";
+}
+
+
+template<>
+std::string GetLatestProfile<ID3D11PixelShader>()
+{
+	assert(g_d3dDevice);
+
+	D3D_FEATURE_LEVEL featureLevel = g_d3dDevice->GetFeatureLevel();
+
+	switch (featureLevel)
+	{
+	case D3D_FEATURE_LEVEL_11_1:
+	case D3D_FEATURE_LEVEL_11_0:
+	{
+		return "ps_5_0";
+	}
+	break;
+	case D3D_FEATURE_LEVEL_10_1:
+	{
+		return "ps_4_1";
+	}
+	break;
+	case D3D_FEATURE_LEVEL_10_0:
+	{
+		return "ps_4_0";
+	}
+	break;
+	case D3D_FEATURE_LEVEL_9_3:
+	{
+		return "ps_4_0_level_9_3";
+	}
+	break;
+	case D3D_FEATURE_LEVEL_9_2:
+	case D3D_FEATURE_LEVEL_9_1:
+	{
+		return "ps_4_0_level_9_1";
+	}
+	break;
+	}
+
+	return "";
+}
+
+template<>
+ID3D11VertexShader* CreateShader<ID3D11VertexShader>(ID3DBlob* pShaderBlob, ID3D11ClassLinkage* pClassLinkage)
+{
+	assert(g_d3dDevice);
+	assert(pShaderBlob);
+	ID3D11VertexShader* pVertexShader = nullptr;
+	g_d3dDevice->CreateVertexShader(pShaderBlob->GetBufferPointer(), pShaderBlob->GetBufferSize(), pClassLinkage, &pVertexShader);
+
+	return pVertexShader;
+}
+
+template<>
+ID3D11PixelShader* CreateShader<ID3D11PixelShader>(ID3DBlob* pShaderBlob, ID3D11ClassLinkage* pClassLinkage)
+{
+	assert(g_d3dDevice);
+	assert(pShaderBlob);
+	ID3D11PixelShader* pPixelShader = nullptr;
+	g_d3dDevice->CreatePixelShader(pShaderBlob->GetBufferPointer(), pShaderBlob->GetBufferSize(), pClassLinkage, &pPixelShader);
+
+	return pPixelShader;
+}
+
+template<class TShaderClass>
+TShaderClass* LoadShader(const std::wstring& fileName, const std::string& entryPoint, const std::string& _profile)
+{
+	ID3DBlob* pShaderBlob = nullptr;
+	ID3DBlob* pErrorBlod = nullptr;
+	TShaderClass* pShader = nullptr;
+
+	std::string profile = _profile;
+	if (profile == "lastest")
+	{
+		profile = GetLastestProfile<TShaderClass>();
+	}
+
+	UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+#if _DEBUG
+	flags |= D3DCOMPILE_DEBUG;
+#endif
+
+	HRESULT hr = D3DCompileFromFile(fileName.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, entryPoint.c_str(), profile.c_str(),
+		flags, 0, &pShaderBlob, &pErrorBlob);
+
+	if (FAILED(hr))
+	{
+		if (pErrorBlob)
+		{
+			std::string msg = (char*)pErrorBlob->GetBufferPointer();
+			OutputDebugStringA(msg.c_str());
+			COMSafeRelease(pShaderBlob);
+			COMSafeRelease(pErrorBlob);
+		}
+		return false;
+	}
+
+	pShader = CreateShader<TShaderClass>(pShaderBlob, nullptr);
+	COMSafeRelease(pShaderBlob);
+	COMSafeRelease(pErrorBlob);
+
+	return pShader;
 }
 
 // This function was inspired by:
