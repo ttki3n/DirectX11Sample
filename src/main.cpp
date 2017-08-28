@@ -31,7 +31,7 @@ ID3D11Buffer* g_d3dIndexBuffer = nullptr;
 ID3D11VertexShader* g_d3dVertexShader = nullptr;
 ID3D11PixelShader* g_d3dPixelShader = nullptr;
 
-//shader resources
+// shader resources
 enum ConstantBuffers
 {
 	CB_APPLICATION,
@@ -41,7 +41,7 @@ enum ConstantBuffers
 };
 
 ID3D11Buffer* g_d3dConstantBuffers[CB_TOTAL];
-XMMATRIX g_WorldMatrix, g_ViewMatrix, g_ProjectionMatric;
+XMMATRIX g_WorldMatrix, g_ViewMatrix, g_ProjectionMatrix;
 
 // data of colored cube
 struct VertexPosColor
@@ -89,7 +89,7 @@ void UnloadContent();
 
 void Update(float deltaTime);
 void Render();
-void Cleanup();
+void CleanUp();
 
 
 
@@ -176,8 +176,8 @@ int Run()
 			//limit
 			deltaTime = std::min<float>(deltaTime, maxTimeStep);
 			
-			//Update(deltaTime);
-			//Render();
+			Update(deltaTime);
+			Render();
 		}
 	}
 	
@@ -209,7 +209,17 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE prevInstance, LPWSTR cmdLine,
 		MessageBox(nullptr, TEXT("Failed to initialize DirectX!"), TEXT("Error"), MB_OK);
 		return -1;
 	}
+
+	if (!LoadContent())
+	{
+		MessageBox(nullptr, TEXT("Failed to load content."), TEXT("Error"), MB_OK);
+		return -1;
+	}
+	
 	int result = Run();
+
+	UnloadContent();
+	CleanUp();
 	return result;
 }
 
@@ -242,7 +252,7 @@ int InitDirectX(HINSTANCE hInstance, BOOL vSync)
 
 	UINT createDeviceFlags = 0;
 #if _DEBUG
-	createDeviceFlags = D3D11_CREATE_DEVICE_DEBUG;
+	//createDeviceFlags = D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
 	D3D_FEATURE_LEVEL featureLevels[] =
@@ -504,6 +514,245 @@ TShaderClass* LoadShader(const std::wstring& fileName, const std::string& entryP
 
 	return pShader;
 }
+
+bool LoadContent()
+{
+	assert(g_d3dDevice);
+	// create & initialize vertex buffer
+	D3D11_BUFFER_DESC vertexBufferDesc;
+	ZeroMemory(&vertexBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+	vertexBufferDesc.ByteWidth = sizeof(VertexPosColor)* _countof(g_vertices);
+	vertexBufferDesc.CPUAccessFlags = 0;
+	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+	D3D11_SUBRESOURCE_DATA resourceData;
+	ZeroMemory(&resourceData, sizeof(D3D11_SUBRESOURCE_DATA));
+
+	resourceData.pSysMem = g_vertices;
+	
+	HRESULT hr = g_d3dDevice->CreateBuffer(&vertexBufferDesc, &resourceData, &g_d3dVertexBuffer);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	// create & initialize index buffer
+	D3D11_BUFFER_DESC indexBufferDesc;
+	ZeroMemory(&indexBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+	indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	indexBufferDesc.ByteWidth = sizeof(WORD) * _countof(g_indices);
+	indexBufferDesc.CPUAccessFlags = 0;
+	indexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+	resourceData.pSysMem = g_indices;
+
+	hr = g_d3dDevice->CreateBuffer(&indexBufferDesc, &resourceData, &g_d3dIndexBuffer);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	// create constant buffer for the variable in vertex buffer
+	D3D11_BUFFER_DESC constantBufferDesc;
+	ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+	constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	constantBufferDesc.ByteWidth = sizeof(XMMATRIX);
+	constantBufferDesc.CPUAccessFlags = 0;
+	constantBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+
+	hr = g_d3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &g_d3dConstantBuffers[CB_APPLICATION]);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	hr = g_d3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &g_d3dConstantBuffers[CB_FRAME]);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	hr = g_d3dDevice->CreateBuffer(&constantBufferDesc, nullptr, &g_d3dConstantBuffers[CB_OBJECT]);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	// load the compiled shaders
+	ID3DBlob* vertexShaderBlob;
+	LPCWSTR compiledVertexShaderObject = L"SimpleVertexShader.cso";
+
+	hr = D3DReadFileToBlob(compiledVertexShaderObject, &vertexShaderBlob);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	hr = g_d3dDevice->CreateVertexShader(vertexShaderBlob->GetBufferPointer(), vertexShaderBlob->GetBufferSize(), nullptr, &g_d3dVertexShader);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+
+	// create the input layout for the vertex shader
+	D3D11_INPUT_ELEMENT_DESC vertexLayoutDesc[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(VertexPosColor, pos), D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(VertexPosColor, color), D3D11_INPUT_PER_VERTEX_DATA, 0 }
+	};
+
+	hr = g_d3dDevice->CreateInputLayout(vertexLayoutDesc, _countof(vertexLayoutDesc), vertexShaderBlob->GetBufferPointer(),
+		vertexShaderBlob->GetBufferSize(), &g_d3dInputLayout);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+	COMSafeRelease(vertexShaderBlob);
+
+	// load the precompiled pixel shader
+	ID3DBlob* pixelShaderBlob;
+	LPCWSTR compiledPixelShaderObject = L"SimplePixelShader.cso";
+
+	hr = D3DReadFileToBlob(compiledPixelShaderObject, &pixelShaderBlob);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+
+	hr = g_d3dDevice->CreatePixelShader(pixelShaderBlob->GetBufferPointer(), pixelShaderBlob->GetBufferSize(), nullptr, &g_d3dPixelShader);
+	if (FAILED(hr))
+	{
+		return false;
+	}
+	COMSafeRelease(pixelShaderBlob);
+
+	// Setup projection matrix
+	RECT clientRect;
+	GetClientRect(g_windowHandle, &clientRect);
+
+	// compute the exact client dimensions.
+	float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
+	float clientHeight = static_cast<float>(clientRect.bottom - clientRect.top);
+
+	g_ProjectionMatrix = XMMatrixPerspectiveFovLH(XMConvertToRadians(45.0f), clientWidth / clientHeight, 0.1f, 100.f);
+
+	g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_APPLICATION], 0, nullptr, &g_ProjectionMatrix, 0, 0);
+
+	return true;
+}
+
+void Update(float deltaTime)
+{
+	XMVECTOR eyePosition = XMVectorSet(0, 0, -10, 1);
+	XMVECTOR focusPoint = XMVectorSet(0, 0, 0, 1);
+	XMVECTOR upDirection = XMVectorSet(0, 1, 0, 0);
+	g_ViewMatrix = XMMatrixLookAtLH(eyePosition, focusPoint, upDirection);
+	g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_FRAME], 0, nullptr, &g_ViewMatrix, 0, 0);
+
+	static float angle = 0.0f;
+	angle += 1.0f * deltaTime;
+	XMVECTOR rotationAxis = XMVectorSet(0, 1, 1, 0);
+
+	g_WorldMatrix = XMMatrixRotationAxis(rotationAxis, angle);
+	g_d3dDeviceContext->UpdateSubresource(g_d3dConstantBuffers[CB_OBJECT], 0, nullptr, &g_WorldMatrix, 0, 0);
+}
+
+void Clear(const FLOAT clearColor[4], FLOAT clearDepth, UINT8 clearStencil)
+{
+	g_d3dDeviceContext->ClearRenderTargetView(g_d3dRenderTargetView, clearColor);
+	g_d3dDeviceContext->ClearDepthStencilView(g_d3dDepthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, clearDepth, clearStencil);
+}
+
+void Present(bool vSync)
+{
+	if (vSync)
+	{
+		g_d3dSwapChain->Present(1, 0);
+	}
+	else
+	{
+		g_d3dSwapChain->Present(0, 0);
+	}
+}
+
+void Render()
+{
+	assert(g_d3dDevice);
+	assert(g_d3dDeviceContext);
+
+	Clear(Colors::CornflowerBlue, 1.0f, 0);
+
+	// setup input assembler stage
+	const UINT vertexStride = sizeof(VertexPosColor);
+	const UINT offset = 0;
+
+	g_d3dDeviceContext->IASetVertexBuffers(0, 1, &g_d3dVertexBuffer, &vertexStride, &offset);
+	g_d3dDeviceContext->IASetInputLayout(g_d3dInputLayout);
+	g_d3dDeviceContext->IASetIndexBuffer(g_d3dIndexBuffer, DXGI_FORMAT_R16_UINT, 0);
+	g_d3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// setup vertex shader stage
+	g_d3dDeviceContext->VSSetShader(g_d3dVertexShader, nullptr, 0);
+	g_d3dDeviceContext->VSSetConstantBuffers(0, 3, g_d3dConstantBuffers);
+
+	// setup rasterizer stage
+	// After the vertex shader stage but before the pixel shader stage comes the rasterizer stage. 
+	// The rasterizer stage is responsible for interpolating the various vertex attributes output from the vertex shader and invoking the pixel shader program for each screen pixel which is affected by the rendered geometry.
+	g_d3dDeviceContext->RSSetState(g_d3dRasterizeState);
+	g_d3dDeviceContext->RSSetViewports(1, &g_viewport);
+
+	// setup the pixel shader stage
+	g_d3dDeviceContext->PSSetShader(g_d3dPixelShader, nullptr, 0);
+
+	// setup output merger stage
+	g_d3dDeviceContext->OMSetRenderTargets(1, &g_d3dRenderTargetView, g_d3dDepthStencilView);
+	g_d3dDeviceContext->OMSetDepthStencilState(g_d3dDepthStencilState, 1);
+
+	g_d3dDeviceContext->DrawIndexed(_countof(g_indices), 0, 0);
+
+	Present(g_enableVSync);
+}
+
+// cleanup contents in LoadContent()
+void UnloadContent()
+{
+	COMSafeRelease(g_d3dConstantBuffers[CB_APPLICATION]);
+	COMSafeRelease(g_d3dConstantBuffers[CB_FRAME]);
+	COMSafeRelease(g_d3dConstantBuffers[CB_OBJECT]);
+	COMSafeRelease(g_d3dIndexBuffer);
+	COMSafeRelease(g_d3dVertexBuffer);
+	COMSafeRelease(g_d3dInputLayout);
+	COMSafeRelease(g_d3dVertexShader);
+	COMSafeRelease(g_d3dPixelShader);
+}
+
+// cleanup contents in InitDirectX()
+void CleanUp()
+{
+	COMSafeRelease(g_d3dDepthStencilView);
+	COMSafeRelease(g_d3dRenderTargetView);
+	COMSafeRelease(g_d3dDepthStencilBuffer);
+	COMSafeRelease(g_d3dDepthStencilState);
+	COMSafeRelease(g_d3dRasterizeState);
+	COMSafeRelease(g_d3dSwapChain);
+	COMSafeRelease(g_d3dDeviceContext);
+	COMSafeRelease(g_d3dDevice);
+}
+
+
+
+
+
+
+
+
+
+
 
 // This function was inspired by:
 // http://www.rastertek.com/dx11tut03.html

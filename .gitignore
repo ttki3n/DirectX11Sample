@@ -9,3 +9,5 @@ prj/DirectX11Sample/DirectX11Sample.vcxproj.user
 prj/Debug
 prj/x64
 prj/DirectX11Sample/x64
+*.db
+prj/.vs/D3D11sln/v14/.suo
